@@ -348,6 +348,22 @@ try {
     check("終えた回は、別のタブが新しく保存した古い写しから戻さない", !left, JSON.stringify(left));
     await ctx.close();
   }
+  // 同じ問題の途中で、保存に失敗した側と保存できた側のまちがいを合わせる（CodeRabbit shindo-yomi#1）
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 800 } });
+    const g = await newPage(390, ctx);
+    const got = await g.evaluate(() => {
+      const base = __nm.load(), mk = (w, w2) => ({ mode: "p", date: __nm.todayKey(), list: ["t4|m1", "t1|m1"], res: [], cur: { i: 0, tag: "t4|m1", wrong: w, hints: 0, step: 2, w2 }, id: "mg1" });
+      const a = JSON.parse(JSON.stringify(base)); a.runs.p = mk(["震度1"], ["gas"]); a.t = 100;
+      const b = JSON.parse(JSON.stringify(base)); b.runs.p = mk(["震度7"], ["hiroi"]); b.t = 200;
+      localStorage.setItem("shd-v1", JSON.stringify(b)); __nm.setMem(JSON.stringify(a));
+      try { return __nm.load().runs.p.cur; } finally { __nm.setMem(null); }
+    });
+    check("同じ問題の途中なら、保存に失敗した側のまちがい（1段目・2段目）も消さずに合わせる", got && got.wrong.includes("震度1") && got.wrong.includes("震度7") && got.w2.includes("gas") && got.w2.includes("hiroi"), JSON.stringify(got));
+    const n = await g.evaluate(() => { __nm.save((s) => { s.runs.p = { mode: "p", date: __nm.todayKey(), list: ["t4|s1", "t1|s1"], res: [], cur: null, id: "sc1" }; }); __nm.play("p"); __nm.sureCount(true); __nm.sureCount(true); return __nm.load().runs.p.ds; });
+    check("「自信あり」の数は1問につき1回だけ（2つのタブで同じ問題を当てても2回足さない）", n && n.n === 1 && n.ok === 1, JSON.stringify(n));
+    await ctx.close();
+  }
 
   // 古いタブ：同じ問題を2つのタブで開き、片方で答えたら、もう片方は二重に入れない
   {
@@ -515,7 +531,7 @@ try {
   check("2段目「当てはまる、いちばん上の目安は？」の目安：どの種類の問題も5つ（まだ・鉄道・ガス／エレベーター・伝言ダイヤル・広い地域）のどれかで、5つとも使う", bad.length === 0 && Object.keys(G.GROUPS).join() === "mae,tetsudo,gas,denwa,hiroi" && used.size === 5, bad.join(",")); }
 // 引き継ぎコード（shared-workflows template/qa/transfer-check.mjs）
 try {
-  const sample = { "shd-v1": JSON.stringify({ v: 1, tut: true, days: { "2026-11-13": { m: [0, 1, 0, 0, 2], k: ["t4", "t1", "t3", "i3", "o5s"] } }, hdays: {}, adays: {}, dex: { t4: 1, t0: 1, t6s: 1, t3: 1, o4: 1 }, runs: {}, kofi: {}, ach: {}, ebest: 7, t: 1 }), "shd-fs": "3" };
+  const sample = { "shd-v1": JSON.stringify({ v: 1, tut: true, days: { "2026-11-13": { m: [0, 1, 0, 0, 2], k: ["t4", "t1", "t3", "i3", "o5s"] } }, hdays: {}, adays: {}, dex: { t4: 1, t0: 1, t6s: 1, t3: 1, o4: 1 }, runs: {}, kofi: {}, ach: {}, ebest: 7, t: 1 }), "shd-fs": "3", "shd-depth": JSON.stringify({ v: 1, rv: { "t4|x1": { s: 1, due: "2026-11-20", t: 5 } } }) }; // 復習の記録も引き継ぐかを見る（CodeRabbit shindo-yomi#1）
   await checkTransfer({ browser, url, game: "shindo-yomi", sample, check, open: async (pg) => { if (await pg.locator("#howto[open]").count()) await pg.click("#howto-ok"); } });
 } catch (e) { check("引き継ぎの検査が最後まで動く", false, e.message.split("\n")[0]); }
 await browser.close();

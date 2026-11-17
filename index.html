@@ -439,7 +439,15 @@ function load() {
     if (x === undefined || y === undefined) { if (x || y) s.runs[m] = x || y; continue; }
     if (!x || !y) { const r = x || y; if (!r || (s.gone && s.gone[r.id]) || bank(s, r) || doneOf(r)) { s.runs[m] = null; continue; } const bd = bookOf(s, r.mode); if (!bd || !bd[r.date]) s.runs[m] = r; continue; }
     if (x.id !== y.id && x.date !== y.date) { const [w, l] = x.date > y.date ? [x, y] : [y, x]; bank(s, l); s.runs[m] = w; }
-    else if (x.id === y.id) { const px = prog(x), py = prog(y); s.runs[m] = px > py ? x : py > px ? y : n.runs[m]; }
+    else if (x.id === y.id) {
+      const px = prog(x), py = prog(y), w = px > py ? x : py > px ? y : n.runs[m], o = w === x ? y : x;
+      // 同じ問題の途中なら、まちがい・ヒントは両方を合わせる（保存に失敗した側のまちがいを消さない。CodeRabbit shindo-yomi#1）
+      if (w && o && w.cur && o.cur && typeof w.cur === "object" && typeof o.cur === "object" && w.cur.i === o.cur.i && w.cur.tag === o.cur.tag && w.res.length === o.res.length) {
+        const u = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
+        w.cur = { ...w.cur, wrong: u(w.cur.wrong, o.cur.wrong), w2: u(w.cur.w2, o.cur.w2), hints: Math.max(+w.cur.hints || 0, +o.cur.hints || 0), step: Math.max(w.cur.step === 2 ? 2 : 1, o.cur.step === 2 ? 2 : 1), h2: w.cur.h2 || o.cur.h2 ? 1 : 0, jd: w.cur.jd || o.cur.jd || null };
+      }
+      s.runs[m] = w;
+    }
   }
   return tidy(s);
 }
@@ -683,7 +691,8 @@ function chooseWhy(x) {
   solved();
 }
 // この回の「自信あり」の数と当たり（結果の画面に出す。開き直しても残るよう回の記録に入れる）
-function sureCount(ok) { save((s) => { const r = s.runs[MODE]; if (!same(r)) return; r.ds = r.ds || { n: 0, ok: 0 }; r.ds.n++; if (ok) r.ds.ok++; }); }
+// 1問につき1回だけ数える（同じ問題を2つのタブで開いても2回足さない。CodeRabbit shindo-yomi#1）
+function sureCount(ok) { const q = cur.i + ":" + cur.tag; save((s) => { const r = s.runs[MODE]; if (!same(r) || r.dsq === q) return; r.dsq = q; r.ds = r.ds || { n: 0, ok: 0 }; r.ds.n++; if (ok) r.ds.ok++; }); }
 function choose(j) {
   if (cur.done || cur.step === 2) return;
   const t = cur.P.opts[j];
@@ -870,7 +879,7 @@ function about() {
   $("back").onclick = home; bindFooter(); toTop();
 }
 
-window.__nm = { setMem: (j) => { mem = j; }, randomTags, idsOf, mode: () => MODE, load, save, todayKey, dayNo, lateDays, ACH, achGot, nextAch, tally, shareText, streak, endlessList, moreList, ERAMP, TIPS, cur: () => cur, play: (m) => { if (m) MODE = m; play(); }, home, cal, book, about, EPOCH, KEY, G, start: startRun, setMore: (f) => { const o = moreHook; moreHook = f; return o; } };
+window.__nm = { sureCount: (ok) => sureCount(ok), setMem: (j) => { mem = j; }, randomTags, idsOf, mode: () => MODE, load, save, todayKey, dayNo, lateDays, ACH, achGot, nextAch, tally, shareText, streak, endlessList, moreList, ERAMP, TIPS, cur: () => cur, play: (m) => { if (m) MODE = m; play(); }, home, cal, book, about, EPOCH, KEY, G, start: startRun, setMore: (f) => { const o = moreHook; moreHook = f; return o; } };
 home();
 if ("serviceWorker" in navigator && location.protocol === "https:" && /github\.io$/.test(location.hostname)) navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
