@@ -335,11 +335,12 @@ html.a11y-say body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!i
   <ol>
     <li>揺れの様子（人の感じ方・部屋の中・外・建物など）が出ます。</li>
     <li>気象庁の解説表で、その様子が書かれている震度（0〜7）を押します。</li>
-    <li>正解したら「まちで起きることがあるのは？」を5つから選びます。</li>
+    <li>正解したら、まちの目安（鉄道・ガス・電話・電気などが止まる目安）のうち、当てはまるいちばん上を5つから選びます。目安は強い揺れほど積み重なります。</li>
     <li>最後に、わけと資料の出どころが出ます。</li>
   </ol>
   <p>自信があるときは、答える前に「🎯 自信あり？」を押します（押さなくても遊べます）。</p>
   <p>まちがえても、何度でも選び直せます。まちがえた問題は、次の日から「復習」にもどってきます。今日の5問はだれでも同じで、1日1回。時間制限はありません。</p>
+  <p>解説表は、その震度で起きることがある様子です。様子から震度を決めるものではありません。</p>
   <p>このゲームは震度の目安を知る練習です。防災の助言ではありません。公式の情報の代わりではありません。地震の情報は気象庁で確かめてください。</p>
   <p><a id="fb2" target="_blank" rel="noopener">感想を送る</a></p>
   <button class="main" id="howto-ok" style="width:100%">わかった</button>
@@ -653,7 +654,7 @@ function paint() {
   $("hintbox").innerHTML = cur.hints && !cur.done ? `<div class="hint" role="status">💡 ${esc(cur.P.look)}${cur.hints >= 2 ? `<br>💡 ${esc(cur.P.key)}` : ""}</div>` : "";
 }
 function hint() { if (cur.done || cur.hints >= 2) return; if (cur.step === 2) { if (cur.h2 || !left2Of().length) return; cur.h2 = 1; cur.hints++; keep(); return paintWhy(); } cur.hints++; keep(); paint(); }
-// 2段目：正解したら「まちで起きることがあるのは？」を5つから選ぶ（game-dev.md「1問を深くする」）
+// 2段目：正解したら「当てはまる、いちばん上の目安は？」を5つから選ぶ（game-dev.md「1問を深くする」）
 const GK = Object.keys(G.GROUPS);
 // 2段目のヒント：ちがう目安を1つ消す（消すのは決まった1つ。まちがいの数で変えない）
 const left2Of = () => GK.filter((x) => x !== cur.P.grp && !cur.w2.includes(x));
@@ -661,10 +662,10 @@ const cut2Of = () => (cur.h2 ? left2Of().slice(0, 1) : []);
 function askWhy() {
   const P = cur.P;
   document.querySelectorAll(".ch").forEach((b) => { b.disabled = true; if (P.opts[+b.dataset.j] === P.ans) { b.classList.remove("ng"); b.classList.add("ok"); } });
-  $("msg").className = "msg"; $("msg").textContent = `✓ 正解！ では、まちで起きることがあるのは？${cur.jd && cur.jd.text ? "　" + cur.jd.text : ""}`;
-  if ($("ask")) $("ask").textContent = "まちで起きることがあるのは？";
+  $("msg").className = "msg"; $("msg").textContent = `✓ 正解！ では、当てはまる、いちばん上の目安は？${cur.jd && cur.jd.text ? "　" + cur.jd.text : ""}`;
+  if ($("ask")) $("ask").textContent = "当てはまる、いちばん上の目安は？";
   document.querySelectorAll("#card [data-a11y-say]").forEach((e) => e.removeAttribute("data-a11y-say")); // 読み上げは2段目の問いと選び肢だけ（funka-level #1 の CodeRabbit）
-  $("why").innerHTML = `<p class="note" data-a11y-say>まちで起きることがあるのは？</p><div class="why" role="group" aria-label="まちで起きることがあるもの">${GK.map((x) => `<button data-g="${x}" data-a11y-say><b>${G.GROUPS[x].name}</b><small>${G.GROUPS[x].sub}</small></button>`).join("")}</div>`;
+  $("why").innerHTML = `<p class="note" data-a11y-say>当てはまる、いちばん上の目安は？</p><div class="why" role="group" aria-label="当てはまるいちばん上の目安">${GK.map((x) => `<button data-g="${x}" data-a11y-say><b>${G.GROUPS[x].name}</b><small>${G.GROUPS[x].sub}</small></button>`).join("")}</div>`;
   document.querySelectorAll(".why button").forEach((b) => (b.onclick = () => chooseWhy(b.dataset.g)));
   paintWhy();
 }
@@ -677,7 +678,7 @@ function paintWhy() {
 function chooseWhy(x) {
   if (cur.done || cur.step !== 2) return;
   if (!same(load().runs[MODE])) { toast("別の画面で先に進んでいます"); return play(); }
-  if (x !== cur.P.grp) { if (cur.w2.includes(x)) return; buzz(40); cur.w2.push(x); keep(); paintWhy(); $("msg").className = "msg bad"; $("msg").textContent = "✕ その震度の目安ではありません。もう一度どうぞ。"; return; }
+  if (x !== cur.P.grp) { if (cur.w2.includes(x)) return; buzz(40); cur.w2.push(x); keep(); paintWhy(); $("msg").className = "msg bad"; $("msg").textContent = GK.indexOf(x) < GK.indexOf(cur.P.grp) ? "✕ それも当てはまりますが、もっと上の目安があります。もう一度どうぞ。" : "✕ その目安には、まだ届きません。もう一度どうぞ。"; return; } // 目安は積み重なるので、下の目安は「当てはまるが、いちばん上ではない」（CodeRabbit shindo-yomi#1）
   const b = document.querySelector(`.why button[data-g="${x}"]`); if (b) b.classList.add("ok");
   solved();
 }
@@ -695,7 +696,7 @@ function choose(j) {
     $("msg").className = "msg bad"; $("msg").textContent = (cur.P.type === "ad" ? "✕ その行は、ふつうの書き方です。もう一度どうぞ。" : "✕ ちがいます。もう一度どうぞ。") + (jd && jd.text ? "　" + jd.text : "");
     return;
   }
-  // 正解（続けて「まちで起きることがあるのは？」を選ぶ）
+  // 正解（続けて「当てはまる、いちばん上の目安は？」を選ぶ）
   const jd = Depth.judge(true); if (jd && jd.sure) { cur.jd = jd; sureCount(true); }
   if (cur.P.grp) { cur.step = 2; keep(); buzz(10); return askWhy(); }
   solved();

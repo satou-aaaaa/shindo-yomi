@@ -21,7 +21,8 @@
   // 選び肢になる震度（気象庁の10階級。並びは弱い順）
   const LEVELS = ["震度0", "震度1", "震度2", "震度3", "震度4", "震度5弱", "震度5強", "震度6弱", "震度6強", "震度7"];
 
-  // 2段目「このくらいの揺れで、まちで起きることがあるのは？」の5つ。解説表の「ライフライン・インフラ等への影響」の目安で、震度で決まる
+  // 2段目「当てはまる、いちばん上の目安は？」の5つ（下から順）。解説表の「ライフライン・インフラ等への影響」の目安は「震度○程度以上」で積み重なるので、
+  // 強い震度では下の目安も当てはまる。答えは当てはまるうちいちばん上の1つで、震度で決まる（CodeRabbit shindo-yomi#1）
   const GROUPS = {
     mae: { name: "止まる目安にはまだ届かない", sub: "表の目安は、もう少し強い揺れから" },
     tetsudo: { name: "鉄道・高速道路が見合わせになることがある", sub: "安全の確認のため" },
@@ -29,7 +30,7 @@
     denwa: { name: "災害用伝言ダイヤルなどが始まる", sub: "安否を伝えるしくみ" },
     hiroi: { name: "広い地域でガス・水道・電気が止まることがある", sub: "とても強い揺れ" },
   };
-  // 震度（LEVELS の番号）→ 2段目の答え
+  // 震度（LEVELS の番号）→ 2段目の答え（当てはまるいちばん上の目安）
   const GRP_OF = ["mae", "mae", "mae", "mae", "tetsudo", "gas", "gas", "denwa", "hiroi", "hiroi"];
   const GRP_WHY = {
     mae: "ライフラインの目安は震度4程度からで、それより弱い揺れの目安は表にありません。",
@@ -45,22 +46,22 @@
   const MEDIA = { taikan: "人の体感・行動", okunai: "屋内の様子", okugai: "屋外の様子", mokuzo: "木造の建物", rc: "鉄筋コンクリートの建物", jiban: "地盤・斜面" };
 
   // 選び肢：やさしいは3つ（答えと2つ以上はなれた震度）、ふつうは4つ、むずかしいは4つ（となりの震度を1つ必ず入れる）
-  function distract(R, a, lv) {
-    const all = LEVELS.map((_, i) => i).filter((i) => i !== a);
+  function distract(R, a, lv, same) {
+    const all = LEVELS.map((_, i) => i).filter((i) => i !== a && !same.includes(i)); // same：解説表で同じ欄（合わせた枠）に入る震度。まちがいの選び肢にしない
     if (lv === 0) return pickN(R, all.filter((i) => Math.abs(i - a) >= 2), 2);
     if (lv === 1) return pickN(R, all, 3);
     const nb = all.filter((i) => Math.abs(i - a) === 1), rest = all.filter((i) => Math.abs(i - a) >= 2 && Math.abs(i - a) <= 5);
     return [...pickN(R, nb, 1), ...pickN(R, rest, 2)];
   }
   // 震度を当てる問題。a：答えの震度の番号、col：解説表の欄、sit：様子の言い方
-  function lvl(a, col, sit) {
+  function lvl(a, col, sit, same = []) {
     return (R, lv) => {
-      const si = ri(R, 0, sit.length - 1), ds = distract(R, a, lv);
+      const si = ri(R, 0, sit.length - 1), ds = distract(R, a, lv, same);
       const q = sit[si] + "　表では震度いくつ？";
       return { type: "act", media: MEDIA[col], q, opts: shuffle(R, [a, ...ds]).map((i) => LEVELS[i]), ans: LEVELS[a], rev: false, v: `${si}:${ds.join(".")}` };
     };
   }
-  const K = (id, lv, a, col, name, look, key, why, sit, src = ["hyo", "life"]) => ({ id, lv, a, ans: LEVELS[a], grp: GRP_OF[a], col, name, look, key, why, src, make: lvl(a, col, sit) });
+  const K = (id, lv, a, col, name, look, key, why, sit, same = []) => ({ id, lv, a, ans: LEVELS[a], grp: GRP_OF[a], col, name, look, key, why, same, src: ["hyo", "life"], make: lvl(a, col, sit, same) });
 
   const KINDS = [
     // ---- やさしい ----
@@ -151,11 +152,11 @@
       "震度6強では、耐震性が低い鉄筋コンクリートの建物で、斜めやX状のひび割れがみられることがあり、1階や中間階の柱が崩れて倒れるものがあります。",
       ["耐震性が低い鉄筋コンクリートの建物で、1階や中間階の柱が崩れ、倒れるものがある。", "耐震性が低い鉄筋コンクリートの建物に、斜めやX状のひび割れがみられることがある。"]),
     K("j6s", 2, 8, "jiban", "震度6強：大規模な地すべり", "がけ崩れが「多発」する段階です。", "大きな地割れが生じ、がけ崩れが多発し、大規模な地すべりや山体の崩壊が起きることがあります。",
-      "震度6強では、大きな地割れが生じることがあり、がけ崩れが多発し、大規模な地すべりや山体の崩壊が発生することがあります。",
-      ["がけ崩れが多発し、大規模な地すべりや山体の崩壊が起きることがある。", "大きな地割れが生じることがあり、がけ崩れが多発する。"]),
+      "震度6強・7（表では同じ欄）では、大きな地割れが生じることがあり、がけ崩れが多発し、大規模な地すべりや山体の崩壊が起きることがあります。",
+      ["がけ崩れが多発し、大規模な地すべりや山体の崩壊が起きることがある。", "大きな地割れが生じることがあり、がけ崩れが多発する。"], [9]),
     K("j5k", 2, 5, "jiban", "震度5弱：液状化・落石", "地盤や斜面の被害の目安が始まる段階です。", "地盤に亀裂や液状化が生じたり、落石やがけ崩れが起きたりすることがあります。",
-      "震度5弱では、地盤に亀裂や液状化が生じることがあり、斜面では落石やがけ崩れが発生することがあります。",
-      ["地盤に亀裂や液状化が生じることがある。斜面では落石やがけ崩れが起きることがある。", "ゆるい砂の地盤で液状化が起き、斜面で落石があることがある。"]),
+      "震度5弱・5強（表では同じ欄）では、地盤に亀裂や液状化が生じることがあり、斜面では落石やがけ崩れが発生することがあります。",
+      ["地盤に亀裂や液状化が生じることがある。斜面では落石やがけ崩れが起きることがある。", "ゆるい砂の地盤で液状化が起き、斜面で落石があることがある。"], [6]),
   ];
   const BY = Object.fromEntries(KINDS.map((k) => [k.id, k]));
   const kindsOf = (lv) => KINDS.filter((k) => k.lv === lv).map((k) => k.id);

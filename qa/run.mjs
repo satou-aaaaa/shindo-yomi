@@ -27,6 +27,8 @@ const TB = {
   t2: "震度2", t3: "震度3", t5s: "震度5強", t6j: "震度6弱", i2: "震度2", i3: "震度3", i4: "震度4", i5k: "震度5弱", i5s: "震度5強", o3: "震度3",
   i6j: "震度6弱", i6s: "震度6強", o4: "震度4", o5k: "震度5弱", o5s: "震度5強", o6j: "震度6弱", o6s: "震度6強", o7: "震度7", m5k: "震度5弱", m6j: "震度6弱", m7: "震度7", r6s: "震度6強", j6s: "震度6強", j5k: "震度5弱",
 };
+// 解説表で2つの震度を合わせた欄（地盤・斜面の 5弱・5強 と 6強・7）。答えと同じ欄の震度は、まちがいの選び肢にしない（CodeRabbit shindo-yomi#1）
+const SAME = { j5k: ["震度5強"], j6s: ["震度7"] };
 // 2段目の答え：解説表「ライフライン・インフラ等への影響」の目安（震度4程度以上で鉄道・高速道路、5弱程度以上でガス・エレベーター・断水・停電、6弱程度以上で災害用伝言ダイヤル、6強程度以上で広い地域）
 const ORDER = ["震度0", "震度1", "震度2", "震度3", "震度4", "震度5弱", "震度5強", "震度6弱", "震度6強", "震度7"];
 const grpOf = (lvl) => { const i = ORDER.indexOf(lvl); return i >= 8 ? "hiroi" : i === 7 ? "denwa" : i >= 5 ? "gas" : i === 4 ? "tetsudo" : "mae"; };
@@ -43,9 +45,10 @@ const grpOf = (lvl) => { const i = ORDER.indexOf(lvl); return i >= 8 ? "hiroi" :
       else {
         if (P.ans !== t) why.push("答えが解説表の表とちがう");
         if (P.grp !== grpOf(t)) why.push("2段目が解説表の目安とちがう");
-        if (!k.why.startsWith(t.replace("震度", "震度"))) why.push("説明の震度が答えとちがう");
+        if (!k.why.startsWith(t)) why.push("説明の震度が答えとちがう");
         if (!/　表では震度いくつ？$/.test(P.q) || P.rev) why.push("問いの言い方がちがう");
         if (k.lv === 0 && di.some((d) => d < 2)) why.push("やさしいのに、となりの震度がまじる");
+        if (P.opts.some((o) => (SAME[k.id] || []).includes(o))) why.push("表で同じ欄の震度が、まちがいの選び肢にまじる");
         if (k.lv === 2 && !di.includes(1)) why.push("むずかしいのに、となりの震度が無い");
       }
       if (!P.src.length || P.src.some((x) => !Array.isArray(x) || !/^https:\/\/www\.jma\.go\.jp\//.test(x[1]))) why.push("出典が無い");
@@ -66,6 +69,7 @@ const grpOf = (lvl) => { const i = ORDER.indexOf(lvl); return i >= 8 ? "hiroi" :
   check("出典は気象庁の震度のページだけ", okSrc);
   check("震度7の人の体感（表で空欄）・地震のあとの行動（防災の判断の題材）・噴火を出さない", !G.KINDS.some((k) => (k.ans === "震度7" && k.col === "taikan")) && !G.KINDS.some((k) => { const all = [k.why, k.look, k.key]; for (let i = 0; i < 100; i++) { const P = G.make(`${k.id}|nz${i}`); all.push(P.q, ...P.opts); } return /避難|逃げ|机の下|身を守|噴火|津波/.test(all.join()); }));
   const sb = Object.keys(G.GROUPS).filter((g) => ![...G.GROUPS[g].name, ...G.GROUPS[g].sub].length || /震度\d/.test(G.GROUPS[g].name + G.GROUPS[g].sub));
+  check("2段目の目安は下から順で、震度が強いほど上の目安になる（積み重なる目安のうち、いちばん上が答え）", G.GRP_OF.every((g, i) => i === 0 || Object.keys(G.GROUPS).indexOf(g) >= Object.keys(G.GROUPS).indexOf(G.GRP_OF[i - 1])) && Object.keys(G.GROUPS).join() === "mae,tetsudo,gas,denwa,hiroi");
   check("2段目の選び肢に震度の数を書かない（1段目の答えを見ても、目安を思い出さないと選べない）", sb.length === 0, sb.join());
 }
 {
@@ -99,7 +103,7 @@ check("乱数は sort の比較の中で引かない（ブラウザで引く回�
   check("一行の式の途中にコメント // を足さない（行の残りが消える。rosen-hitofude 2026-11-04・nemuri-kotsu#1）", !/;\s*\/\/[^\n]*;\s*\w/.test((gen + "\n" + inl).split("\n").filter((l) => !l.trim().startsWith("//")).join("\n"))); }
 check("言い方：「必ず」「絶対」と言い切らない（表は「ことがある」の目安）", !/必ず助か|絶対に安全|絶対に倒れ|必ず倒れ|必ず起き/.test(html + gen + readme));
 { const howto = (html.match(/<dialog id="howto"[\s\S]*?<\/dialog>/) || [""])[0], ab = (html.match(/function about\(\)[\s\S]*?\n}/) || [""])[0], dis = (t) => /防災の助言/.test(t) && /公式の情報の代わりではありません/.test(t) && /気象庁/.test(t) && /様子から震度を決めるものではありません|防災の助言ではありません/.test(t);
-  check("言い方：遊び方・「このゲームについて」・README のどれにも、防災の助言・公式の情報の代わりではないこと・地震の情報は気象庁で確かめることがある（「このゲームについて」と README には、様子から震度を決めるものではないことも）", dis(howto) && dis(ab) && /様子から震度を決めるものではありません/.test(ab) && /防災の助言/.test(readme) && /代わりではありません/.test(readme) && /様子から震度を決めるものではありません/.test(readme) && /気象庁/.test(readme), `遊び方 ${dis(howto)}・について ${dis(ab)}`); }
+  check("言い方：遊び方・「このゲームについて」・README のどれにも、防災の助言・公式の情報の代わりではないこと・地震の情報は気象庁で確かめることがある（3つとも、様子から震度を決めるものではないことも。CodeRabbit shindo-yomi#1）", dis(howto) && dis(ab) && /様子から震度を決めるものではありません/.test(howto) && /様子から震度を決めるものではありません/.test(ab) && /防災の助言/.test(readme) && /代わりではありません/.test(readme) && /様子から震度を決めるものではありません/.test(readme) && /気象庁/.test(readme), `遊び方 ${dis(howto)}・について ${dis(ab)}`); }
 check("写し元（憲法のしくみ）の言葉が残っていない（game-dev.md A 手順5）", !/憲法|条文|国会|内閣|裁判所|天皇|e-Gov|法律|働き|分け方|kenpo|kps|KPS|チラシ|SNSの投稿/.test(html + gen + readme));
 check("画面にお笑いの言葉を入れない（本物っぽく）", !/お笑い|ギャグ|ツッコミ|なんでやねん|（うそ）/.test(html + gen));
 check("引き継ぎ：transfer.js をゲームの script より前に、このゲームの記録のキー（記録・文字・復習）だけで読む・depth.js も前に読む", /<script src="transfer\.js" data-game="shindo-yomi" data-keys="shd-v1,shd-fs,shd-depth"><\/script>\s*<script src="depth\.js" data-game="shindo-yomi" data-key="shd-depth"><\/script>\s*<\/head>/.test(html) && html.indexOf('src="transfer.js"') < html.indexOf('src="data.js"') && /data-hk/.test(html) && existsSync(path.join(root, "transfer.js")));
@@ -143,7 +147,7 @@ const closeHow = async (p) => { if (await p.locator("#howto[open]").count()) awa
 const ansIdx = (p) => p.evaluate(() => { const c = __nm.cur(); return c.P.opts.indexOf(c.P.ans); });
 const wrongIdx = (p) => p.evaluate(() => { const c = __nm.cur(); return c.P.opts.findIndex((o) => o !== c.P.ans && !c.wrong.includes(o)); });
 const mem = (p) => p.evaluate(() => JSON.parse(localStorage.getItem("shd-v1") || "{}"));
-// 2段目「まちで起きることがあるのは？」が出たら、正しい目安を押す
+// 2段目「当てはまる、いちばん上の目安は？」が出たら、正しい目安を押す
 const why = async (p) => { await p.waitForSelector(".verdict, .why button"); if (await p.locator(".verdict").count()) return; await p.click(`.why button[data-g="${await p.evaluate(() => __nm.cur().P.grp)}"]`); };
 async function solve(p, { wrong = 0 } = {}) {
   for (let i = 0; i < wrong; i++) await p.click(`.ch[data-j="${await wrongIdx(p)}"]`);
@@ -366,7 +370,7 @@ try {
     await ctx.close();
   }
 
-  // 1問を深くする（shared-workflows routines/game-dev.md「1問を深くする」）：自信をかける・2段目「まちで起きることがあるのは？」・復習
+  // 1問を深くする（shared-workflows routines/game-dev.md「1問を深くする」）：自信をかける・2段目「当てはまる、いちばん上の目安は？」・復習
   {
     const q = await newPage(); await closeHow(q);
     await q.evaluate((tags) => __nm.save((s) => { s.runs.p = { mode: "p", date: __nm.todayKey(), list: tags, res: [], cur: null, id: "dp" }; }), ["t4|dp1", "t1|dp2", "o5s|dp3"]);
@@ -379,14 +383,15 @@ try {
     check("自信ありでまちがえると、知らせに「思いこみ」と出て、自信は変えられない", (await q.textContent("#msg")).includes("思いこみ") && await q.locator("#dp-sure:disabled").count() === 1);
     check("まちがえたその時に復習へ入る（解き終えずにやめても残る。2026-11-11 CodeRabbit）", await q.evaluate(() => { const d = JSON.parse(localStorage.getItem("shd-depth") || "{}"); return !!(d.rv && d.rv[__nm.cur().tag]); }));
     await q.click(`.ch[data-j="${await ansIdx(q)}"]`);
-    check("正解すると、2段目「まちで起きることがあるのは？」が5つ出る（押せる所は44px以上）", await q.locator(".why button").count() === 5 && await q.locator(".verdict").count() === 0 && (await q.$$eval(".why button", (b) => b.every((x) => x.getBoundingClientRect().height >= 44))));
-    check("2段目の読み上げは、2段目の問いと5つの目安だけ（1段目の選び肢を読まない。funka-level #1 の CodeRabbit）", await q.evaluate(() => { const e = [...document.querySelectorAll("[data-a11y-say]")]; return e.length === 6 && e[0].textContent.includes("まちで起きることがあるのは") && e.slice(1).every((x) => x.matches(".why button")); }));
+    check("正解すると、2段目「当てはまる、いちばん上の目安は？」が5つ出る（押せる所は44px以上）", await q.locator(".why button").count() === 5 && await q.locator(".verdict").count() === 0 && (await q.$$eval(".why button", (b) => b.every((x) => x.getBoundingClientRect().height >= 44))));
+    check("2段目の読み上げは、2段目の問いと5つの目安だけ（1段目の選び肢を読まない。funka-level #1 の CodeRabbit）", await q.evaluate(() => { const e = [...document.querySelectorAll("[data-a11y-say]")]; return e.length === 6 && e[0].textContent.includes("当てはまる、いちばん上の目安は") && e.slice(1).every((x) => x.matches(".why button")); }));
     check("2段目の間は、1段目の選び肢は押せない", await q.evaluate(() => [...document.querySelectorAll(".ch")].every((b) => b.disabled)));
     await q.reload(); await q.waitForTimeout(150); await q.evaluate(() => __nm.play("p"));
     check("2段目の途中で閉じても、2段目から続く", await q.locator(".why button").count() === 5);
     const wg = await q.evaluate(() => Object.keys(__nm.G.GROUPS).find((x) => x !== __nm.cur().P.grp));
     await q.click(`.why button[data-g="${wg}"]`);
     check("2段目でまちがえると ✕ ちがう（破線）・もう一度選べる", await q.locator(".why button.ng").count() === 1 && (await q.textContent("#msg")).includes("✕"));
+    check("2段目で下の目安（当てはまるが、いちばん上ではない）を選ぶと「もっと上の目安があります」と出る（目安は積み重なる。CodeRabbit shindo-yomi#1）", wg === "mae" && (await q.textContent("#msg")).includes("もっと上の目安があります"));
     await q.click("#hint");
     const ng1 = await q.locator(".why button:disabled").count();
     check("2段目のヒントは、まちがえた目安とは別のちがう目安を消す（★を使って何も消えないことが無い。2026-11-11 CodeRabbit）", ng1 === 2 && await q.locator(".why button:not(:disabled)").count() === 3, ng1);
@@ -399,7 +404,7 @@ try {
     await q.click("#next");
     await q.click(`.ch[data-j="${await ansIdx(q)}"]`); await why(q); await q.click("#next");
     await q.click(`.ch[data-j="${await ansIdx(q)}"]`);
-    check("どの種類の問題も2段目「まちで起きることがあるのは？」が出る", await q.locator(".why button").count() === 5);
+    check("どの種類の問題も2段目「当てはまる、いちばん上の目安は？」が出る", await q.locator(".why button").count() === 5);
     await why(q); await q.waitForSelector(".verdict");
     await q.click("#next"); await q.waitForTimeout(150);
     check("終えた直後の結果に「自信ありの当たり」が出る", (await q.textContent("#surestat")).includes("0/1"));
@@ -507,7 +512,7 @@ try {
   check("記録に constructor などの鍵が入っても、ようす帳と実績の種類に数えない（CodeRabbit funka-level#1）", (await q.textContent("#go-dex")).includes("1/30") && await q.evaluate(() => __nm.tally(__nm.load()).kinds) === 1, await q.textContent("#go-dex"));
   await q.close(); }
 { const bad = G.KINDS.filter((k) => { for (let i = 0; i < 200; i++) if (!G.GROUPS[G.make(`${k.id}|g${i}`).grp]) return true; return false; }).map((k) => k.id), used = new Set(G.KINDS.map((k) => k.grp));
-  check("2段目「まちで起きることがあるのは？」の目安：どの種類の問題も5つ（まだ・鉄道・ガス／エレベーター・伝言ダイヤル・広い地域）のどれかで、5つとも使う", bad.length === 0 && Object.keys(G.GROUPS).join() === "mae,tetsudo,gas,denwa,hiroi" && used.size === 5, bad.join(",")); }
+  check("2段目「当てはまる、いちばん上の目安は？」の目安：どの種類の問題も5つ（まだ・鉄道・ガス／エレベーター・伝言ダイヤル・広い地域）のどれかで、5つとも使う", bad.length === 0 && Object.keys(G.GROUPS).join() === "mae,tetsudo,gas,denwa,hiroi" && used.size === 5, bad.join(",")); }
 // 引き継ぎコード（shared-workflows template/qa/transfer-check.mjs）
 try {
   const sample = { "shd-v1": JSON.stringify({ v: 1, tut: true, days: { "2026-11-13": { m: [0, 1, 0, 0, 2], k: ["t4", "t1", "t3", "i3", "o5s"] } }, hdays: {}, adays: {}, dex: { t4: 1, t0: 1, t6s: 1, t3: 1, o4: 1 }, runs: {}, kofi: {}, ach: {}, ebest: 7, t: 1 }), "shd-fs": "3" };
