@@ -653,7 +653,7 @@ function play() {
     <div id="after"></div>`;
   $("back").onclick = home;
   document.querySelectorAll(".ch").forEach((b) => (b.onclick = () => choose(+b.dataset.j)));
-  Depth.bindSure(tag);
+  Depth.bindSure(tag, cur.id + "|" + cur.i);
   if ($("hint")) $("hint").onclick = hint;
   if ($("quit")) $("quit").onclick = () => { const r = load().runs[MODE]; if (!r || r.id !== run.id) { toast("別の画面で先に進んでいます"); return play(); } finish(); }; // 正解した直後でも降りられる（解いた問題は記録ずみ）。別のタブで始めた新しい回は終えない（funka-level #1 の CodeRabbit）
   if (cur.step === 2) askWhy(); else paint();
