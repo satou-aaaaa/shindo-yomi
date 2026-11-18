@@ -121,6 +121,9 @@ check("README の URL のすぐ後ろに全角の字を続けない（Link check
   { const st = await checkSwStall(sw); check("PWA：通信が止まっても4秒ほどで保存した画面に切り替わり、少しずつ届く受信は待ち、何も無ければ60秒で返す（shared-workflows template/qa/sw-check.mjs）", st.ok, JSON.stringify(st)); }
   check("PWA：manifest にアイコン2つと名前がある", mf.name === "震度よみ" && mf.icons.length >= 2 && mf.start_url === "./"); }
 
+// ミューテーションテスト（Stryker。.github/workflows/mutation.yml）から呼ぶときは、ブラウザを使わない 1・2 だけで終える（1回 数秒）
+if (process.env.QA_DATA_ONLY) { const ng = results.filter((r) => !r.ok); for (const r of ng) console.log(`❌ ${r.name}`); console.log(ng.length ? `❌ ${ng.length}件` : `✅ ${results.length}件`); process.exit(ng.length ? 1 : 0); }
+
 // ---- 3. ブラウザで遊ぶ ----
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".webmanifest": "application/manifest+json" };
 const server = createServer((req, res) => {

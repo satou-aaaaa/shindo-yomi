@@ -1,0 +1,21 @@
+name: Mutation
+
+# ミューテーションテスト（Stryker）：data.js をわざと少しずつ壊し、QA が気づくかを見る。気づかなかった所（検査の穴）はジョブのまとめに出る。
+# 中身は共通部品 satou-aaaaa/shared-workflows の mutation.yml。1回が長いので週1と手で回す。点数では落とさない。
+# QA は QA_DATA_ONLY=1 のとき、ブラウザを使わない検査（qa/run.mjs の 1・2）だけで終わる。
+on:
+  schedule:
+    # 毎週日曜 04:41 JST（= 土曜 19:41 UTC）
+    - cron: "41 19 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation
+  cancel-in-progress: false
+
+jobs:
+  mutation:
+    uses: satou-aaaaa/shared-workflows/.github/workflows/mutation.yml@main
