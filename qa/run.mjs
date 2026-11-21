@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { checkCore } from "./core-check.mjs";
 import { checkTransfer } from "./transfer-check.mjs";
 import { checkSwStall } from "./sw-check.mjs";
 import { checkDepth } from "./depth-check.mjs";
@@ -146,7 +147,8 @@ async function newPage(w = 390, ctx) {
   await p.goto(url); await p.waitForTimeout(200);
   return p;
 }
-const closeHow = async (p) => { if (await p.locator("#howto[open]").count()) await p.click("#howto-ok"); };
+// はじめての人は練習の1問と吹き出し（game-core）。とじてホームへもどる（遊び方の窓が開いていれば閉じる）
+const closeHow = async (p) => { if (await p.locator("#howto[open]").count()) await p.click("#howto-ok"); if (await p.locator("#core-coach").count()) { await p.evaluate(() => Core.coach.leave()); await p.waitForTimeout(100); } };
 const ansIdx = (p) => p.evaluate(() => { const c = __nm.cur(); return c.P.opts.indexOf(c.P.ans); });
 const wrongIdx = (p) => p.evaluate(() => { const c = __nm.cur(); return c.P.opts.findIndex((o) => o !== c.P.ans && !c.wrong.includes(o)); });
 const mem = (p) => p.evaluate(() => JSON.parse(localStorage.getItem("shd-v1") || "{}"));
@@ -162,19 +164,21 @@ async function solve(p, { wrong = 0 } = {}) {
 try {
   // はじめて：遊び方が出る・文字の大きさ
   const p = await newPage();
-  check("はじめて開くと遊び方が出る", await p.locator("#howto[open]").count() === 1);
+  check("はじめて開くと、遊び方の窓でなく練習の1問（やさしい・1問だけ）と吹き出しが出る", await p.locator("#howto[open]").count() === 0 && await p.locator("#core-coach").count() === 1 && await p.evaluate(() => { const r = __nm.load().runs.p; return !!r && r.list.length === 1; }));
   { const c = await browser.newContext(); const r = await c.newPage(); await r.goto(url); await r.waitForTimeout(200); let again = 0;
-    for (let i = 0; i < 10; i++) { await r.evaluate(() => localStorage.clear()); await r.reload(); await r.waitForTimeout(200); await r.keyboard.press("Escape"); await r.reload(); await r.waitForTimeout(200); again += await r.locator("#howto[open]").count(); }
-    check("遊び方を Esc で閉じてすぐ読み直しても出ない（10回）", again === 0);
+    for (let i = 0; i < 10; i++) { await r.evaluate(() => localStorage.clear()); await r.reload(); await r.waitForTimeout(200); await r.keyboard.press("Escape"); await r.reload(); await r.waitForTimeout(200); again += await r.locator("#howto[open], #core-coach").count(); }
+    check("はじめての案内を Esc で閉じてすぐ読み直しても出ない（10回）", again === 0);
   { const c = await browser.newContext(); const r = await c.newPage(); const big = []; // 題が h1{flex:1} で縦に伸び（伸びない形と比べて4pxより高ければ失敗）、iPad の縦で大きなすき間が出た（shared-workflows incidents/2026-11-07-title-stretched.md）
-    for (const [w, h] of [[820, 1180], [390, 844], [1280, 800]]) { await r.setViewportSize({ width: w, height: h }); await r.goto(url); await r.waitForTimeout(200); await r.keyboard.press("Escape"); await r.waitForTimeout(100);
+    for (const [w, h] of [[820, 1180], [390, 844], [1280, 800]]) { await r.setViewportSize({ width: w, height: h }); await r.goto(url); await r.waitForTimeout(200); await closeHow(r); await r.waitForTimeout(100);
       const v = await r.evaluate(() => { const e = [...document.querySelectorAll(".title")].find((x) => x.offsetParent); if (!e) return null; const h = e.getBoundingClientRect().height; const f = e.style.flex; e.style.flex = "none"; const n = e.getBoundingClientRect().height; e.style.flex = f; return h - n; });
       if (v === null || v > 4) big.push(`${w}x${h}:${v === null ? "題なし" : "+" + Math.round(v) + "px"}`); }
     check("ホームの題は縦長の画面でも縦に伸びない（820×1180・390×844・1280×800）", big.length === 0, big.join(" ")); await c.close(); }
     await r.evaluate(() => localStorage.clear()); await r.reload(); await r.waitForTimeout(200);
-    check("「わかった」を押したその場で「見た」が残る", await r.locator("#howto-ok").evaluate((b) => { b.click(); return Object.keys(localStorage).some((k) => { try { return JSON.parse(localStorage.getItem(k)).tut === true; } catch { return false; } }); }));
-    await r.reload(); await r.waitForTimeout(200); check("遊び方を「わかった」で閉じてすぐ読み直しても出ない（その場で残す）", await r.locator("#howto[open]").count() === 0); await c.close(); }
-  await p.click("#howto-ok");
+    check("はじめての練習が始まったその場で「見た」が残る", await r.evaluate(() => Object.keys(localStorage).some((k) => { try { return JSON.parse(localStorage.getItem(k)).tut === true; } catch { return false; } })));
+    await r.reload(); await r.waitForTimeout(200); check("練習の途中で読み直しても、吹き出しも遊び方の窓も出ない（その場で残す）", await r.locator("#howto[open], #core-coach").count() === 0); await c.close(); }
+  await closeHow(p);
+  check("吹き出しをとじてもどると、ホーム（今日の5問）に出る", await p.locator("#go-d").count() === 1);
+  await p.click("#f-how"); check("フッターの「遊び方」で、くわしい遊び方の窓が開く", await p.locator("#howto[open]").count() === 1); await p.click("#howto-ok");
   check("文字の大きさ：はじめは「大きい」（19px）", await p.evaluate(() => getComputedStyle(document.documentElement).fontSize) === "19px");
   await p.click('.fsrow button[data-fs="3"]');
   await p.reload(); await p.waitForTimeout(150);
@@ -532,10 +536,14 @@ try {
   await q.close(); }
 { const bad = G.KINDS.filter((k) => { for (let i = 0; i < 200; i++) if (!G.GROUPS[G.make(`${k.id}|g${i}`).grp]) return true; return false; }).map((k) => k.id), used = new Set(G.KINDS.map((k) => k.grp));
   check("2段目「当てはまる、いちばん上の目安は？」の目安：どの種類の問題も5つ（まだ・鉄道・ガス／エレベーター・伝言ダイヤル・広い地域）のどれかで、5つとも使う", bad.length === 0 && Object.keys(G.GROUPS).join() === "mae,tetsudo,gas,denwa,hiroi" && used.size === 5, bad.join(",")); }
+// game-core（shared-workflows template/qa/core-check.mjs）：はじめての練習1問と吹き出し・感想のリンク
+try {
+  await checkCore({ browser, url, check, solve: async (pg) => { await pg.click(`.ch[data-j="${await ansIdx(pg)}"]`); await why(pg); await pg.waitForSelector(".verdict"); } });
+} catch (e) { check("game-core の検査が最後まで動く", false, e.message.split("\n")[0]); }
 // 引き継ぎコード（shared-workflows template/qa/transfer-check.mjs）
 try {
   const sample = { "shd-v1": JSON.stringify({ v: 1, tut: true, days: { "2026-11-13": { m: [0, 1, 0, 0, 2], k: ["t4", "t1", "t3", "i3", "o5s"] } }, hdays: {}, adays: {}, dex: { t4: 1, t0: 1, t6s: 1, t3: 1, o4: 1 }, runs: {}, kofi: {}, ach: {}, ebest: 7, t: 1 }), "shd-fs": "3", "shd-depth": JSON.stringify({ v: 1, rv: { "t4|x1": { s: 1, due: "2026-11-20", t: 5 } } }) }; // 復習の記録も引き継ぐかを見る（CodeRabbit shindo-yomi#1）
-  await checkTransfer({ browser, url, game: "shindo-yomi", sample, check, open: async (pg) => { if (await pg.locator("#howto[open]").count()) await pg.click("#howto-ok"); } });
+  await checkTransfer({ browser, url, game: "shindo-yomi", sample, check, open: closeHow });
 } catch (e) { check("引き継ぎの検査が最後まで動く", false, e.message.split("\n")[0]); }
 await browser.close();
 server.close();
