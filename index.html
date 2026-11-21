@@ -339,13 +339,14 @@ html.a11y-say body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!i
 // ゲームの共通部品 game-core。ひな形: satou-aaaaa/shared-workflows の template/core/core.js。
 // ゲームでは直さない。index.html の core:begin〜core:end の印のあいだに node scripts/sync-template.mjs <ゲームのフォルダ> で写す
 // （ファイルを足さないので sw.js の SHELL は変えない）。ゲームからは window.Core で使う。
-// 共通部品の版: 1
+// 共通部品の版: 2
 //   1: 2026-11-21 ゲームごとに手で写していた小さな関数を1か所に集めた。40本で同じ役目の関数が何通りにも分かれ
 //      （お知らせの帯 11通り・振動 10通り・文字を安全にする esc 4通り・数の読み込み num 2通り）、
 //      「動きを減らす」でも振動する・お知らせが読み上げられない・num の直し（#410）が22本に届かない・esc が " を変えない、が起きていた
 //      （incidents/2026-11-21-hand-copied-helpers-drift.md）。
 //      あわせて、はじめて遊ぶ人への案内（吹き出し Core.coach）を足した。長い「遊び方」の窓の代わりに、練習の1問を遊びながら
 //      その場で一言ずつ教える（NN/g「Mobile Instructional Overlays」・Andersen ほか CHI 2012「The Impact of Tutorials on Games of Varying Complexity」）。
+//   2: 2026-11-22 感想フォームのゲーム名を、渡さなければ題（<title>）から入れる。sync-template が全ゲームを game-core に切り替える（migrateCore）ため
 // 決まり: 外へ通信しない。ゲームの関数の名前（toast・buzz など）は上書きしない（Core.toast などで呼ぶ）。
 (function () {
   "use strict";
@@ -582,7 +583,7 @@ html.a11y-say body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!i
     const p = new URLSearchParams();
     p.set("usp", "pp_url");
     p.set(ENTRY.kind, KINDS[o.kind] || KINDS.fun);
-    p.set(ENTRY.game, String(o.game || "").slice(0, 80));
+    p.set(ENTRY.game, String(o.game || doc.title || "").slice(0, 80)); // 渡さなければ題（<title>）をゲーム名にする
     p.set(ENTRY.info, feedbackInfo(o));
     return `${FORM}?${p.toString()}`;
   }
@@ -596,10 +597,127 @@ html.a11y-say body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!i
     }, true);
   }
 
-  window.Core = { v: 1, calm, esc, num, jstNow, today, addDays, prevDay, nextDay, md, dayNo, ymOf, ymAdd, untilNext, streak, say, toast, buzz, saveWarn, coach, feedbackUrl, feedbackInfo, bindFeedback };
+  window.Core = { v: 2, calm, esc, num, jstNow, today, addDays, prevDay, nextDay, md, dayNo, ymOf, ymAdd, untilNext, streak, say, toast, buzz, saveWarn, coach, feedbackUrl, feedbackInfo, bindFeedback };
 })();
 </script>
 <!-- core:end -->
+<!-- store:begin（template/store/store.js の写し。ここでは直さない。node scripts/sync-template.mjs で写す） -->
+<script id="game-store">
+// 保存の読み直し（2つの写しを合わせる）の共通部品。ひな形: satou-aaaaa/shared-workflows の template/store/store.js。
+// ゲームでは直さない。index.html の store:begin〜store:end の印のあいだに node scripts/sync-template.mjs <ゲームのフォルダ> で写す（ファイルを足さないので sw.js の SHELL は変えない）。
+// 共通部品の版: 2（上げたら写しの版も上がる。scripts/drift-check.mjs がずれを週次まとめに出す）
+//   1: とことんを終えた保存が失敗したあと、読み直しで古い回が戻る不具合が73本に広がっていた（incidents/2026-11-17-endless-revive-after-save-failure.md）。
+//      load() の合わせ方を1か所に集め、直すときはここだけ直す。
+//   2: 終えた回の id を s.gone に持つゲーム（震度よみ型）で、新しい写しに残った終えた回が消えなかった（hataraku-kimari #1 で発見）。
+//      片方が null の回が、どちらかの写しの gone（既定は gone[r.id]）にあれば、どちらの写しにあっても null にする。
+// 使い方（ゲームの load()）:
+//   function load() { return GameStore.load(KEY, mem, { v: 1, fresh, tidy, bank, doneOf, bookOf, objs: ["days", "runs"] }); }
+// 決まり（どのゲームでも同じ。変えるときはここと scripts/check-store.mjs を直す）:
+//   - 2つの写し（localStorage と、保存に失敗したときの mem）を時刻 t で新しい n・古い o に分ける。
+//   - 数は多いほう・true は残す・入れ物は両方を合わせて数は多いほう（field で変えられる）。
+//   - 途中経過 runs はモードごと。片方が null（その回を終えた）なら、もう片方の回は
+//     済んでいる・記録帳にある・とことん（ended）なら戻さない。終えた回の印 gone にあれば、新しい写しにあっても消す。
+//   - 別の回どうしなら日付の新しいほう（同じ日は n）。古いほうは bank で記録へ入れる。
+//   - 同じ回なら進み具合 prog の大きいほう（同じなら n）。join で両方の印を合わせられる。
+(function (root) {
+  "use strict";
+  const isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+  const VER = 2;
+
+  // 1つの写しを読む（読めない・形がちがう・版がちがうときは null）
+  function parse(text, v) {
+    if (text === null || text === undefined) return null;
+    let x = null;
+    try { x = JSON.parse(text); } catch (e) { return null; }
+    return isObj(x) && x.v === v ? x : null;
+  }
+
+  // 既定の進み具合：答えた数を重く、いまの問題のまちがい・ヒントを軽く見る
+  const progOf = (r) => (r && r.res ? r.res.length : 0) * 1000 + (r && r.cur ? (r.cur.wrong || []).length * 10 + (r.cur.hints || 0) : 0);
+
+  // 回以外の記録を合わせる
+  function fields(s, n, o, opt) {
+    for (const k in o) {
+      if (k === "runs" || k === "t") continue;
+      const x = o[k], y = n[k];
+      if (opt.field) { const r = opt.field(k, x, y, s); if (r !== undefined) { s[k] = r; continue; } }
+      if (Array.isArray(x) && Array.isArray(y)) s[k] = y;
+      else if (isObj(x) && isObj(y)) {
+        s[k] = Object.assign({}, x, y);
+        for (const q in x) if (typeof x[q] === "number" && typeof y[q] === "number") s[k][q] = Math.max(x[q], y[q]);
+      } else if (typeof x === "number" && typeof y === "number") s[k] = Math.max(x, y);
+      else if (x === true) s[k] = true;
+    }
+  }
+
+  // 片方が null（終えた）・もう片方が途中の回のとき、その回を戻してよいか
+  function revive(s, r, m, n, opt) {
+    if (!r || opt.bank(s, r) || opt.doneOf(r)) return false;
+    // とことんは日付の記録帳を持たない。終えた側（null）が新しければ、古い回を戻さない
+    if (opt.ended(r, m) && n.runs[m] === null) return false;
+    const bd = opt.bookOf(s, r.mode);
+    return opt.strictBook ? !!bd && !bd[r.date] : !bd || !bd[r.date];
+  }
+
+  // 途中経過（モードごと）を合わせる
+  function runs(s, a, b, n, opt) {
+    const ra = isObj(a.runs) ? a.runs : {}, rb = isObj(b.runs) ? b.runs : {};
+    s.runs = Object.assign({}, n.runs);
+    for (const m of new Set([...Object.keys(ra), ...Object.keys(rb)])) {
+      const x = ra[m], y = rb[m];
+      if (x === undefined || y === undefined) { if (x || y) s.runs[m] = x || y; continue; }
+      if (!x || !y) { const r = x || y; if (r && [s, a, b].some((q) => opt.gone(q, r))) s.runs[m] = null; else if (revive(s, r, m, n, opt)) s.runs[m] = r; continue; }
+      if (!opt.same(x, y, m)) {
+        if (opt.differ) { opt.differ(s, x, y, m, n); continue; }
+        const dx = x.date || "", dy = y.date || "";
+        if (dx === dy && !opt.bankTie) continue; // 同じ日の別の回は新しい写しのまま
+        const [w, l] = dx > dy ? [x, y] : dx < dy ? [y, x] : n.runs[m] === x ? [x, y] : [y, x];
+        opt.bank(s, l);
+        s.runs[m] = w;
+        continue;
+      }
+      const px = opt.prog(x), py = opt.prog(y), w = px > py ? x : py > px ? y : n.runs[m], l = w === x ? y : x;
+      s.runs[m] = w && l && opt.join ? opt.join(w, l, m) : w;
+    }
+  }
+
+  // 2つの写しを合わせる（どちらか null なら、ある方に足りない置き場を補うだけ）
+  function merge(a, b, opt) {
+    opt = Object.assign({
+      tidy: (s) => s, objs: [], bank: () => false, doneOf: () => false, bookOf: () => null, strictBook: false,
+      ended: (r) => r.mode === "e", gone: (s, r) => isObj(s.gone) && !!s.gone[r.id], same: (x, y) => x.id === y.id, prog: progOf, bankTie: false,
+    }, opt);
+    if (typeof opt.fresh !== "function") throw new Error("GameStore: fresh が要る");
+    a = isObj(a) && a.v === opt.v ? a : null;
+    b = isObj(b) && b.v === opt.v ? b : null;
+    if (!a || !b) {
+      const s = Object.assign(opt.fresh(), a || b || {});
+      for (const q of opt.objs) if (!isObj(s[q])) s[q] = {};
+      return opt.tidy(s);
+    }
+    a = Object.assign(opt.fresh(), a);
+    b = Object.assign(opt.fresh(), b);
+    const [n, o] = (a.t || 0) >= (b.t || 0) ? [a, b] : [b, a];
+    const s = Object.assign(opt.fresh(), n);
+    fields(s, n, o, opt);
+    runs(s, a, b, n, opt);
+    if (opt.after) opt.after(s, n, o);
+    return opt.tidy(s);
+  }
+
+  // localStorage の写しと mem（保存に失敗したときの写し）を読んで合わせる
+  function load(key, mem, opt) {
+    let b = null;
+    try { b = parse(root.localStorage.getItem(key), opt.v); } catch (e) {}
+    return merge(parse(mem, opt.v), b, opt);
+  }
+
+  const api = { VER, parse, merge, load, progOf };
+  if (typeof module === "object" && module.exports) module.exports = api;
+  else root.GameStore = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<!-- store:end -->
 <script src="transfer.js" data-game="shindo-yomi" data-keys="shd-v1,shd-fs,shd-depth"></script>
 <script src="depth.js" data-game="shindo-yomi" data-key="shd-depth"></script>
 </head>
@@ -641,9 +759,9 @@ document.documentElement.classList.remove("fs1", "fs2", "fs3"); document.documen
 // ---- 日付（日本時間。だれでも同じ5問）----
 const jstNow = () => new Date(Date.now() + 9 * 3600e3);
 const todayKey = () => jstNow().toISOString().slice(0, 10);
-const dayNo = (k) => Math.round((Date.parse(k) - Date.parse(EPOCH)) / 864e5) + 1;
-const prevDay = (k) => new Date(Date.parse(k) - 864e5).toISOString().slice(0, 10);
-const md = (k) => `${+k.slice(5, 7)}/${+k.slice(8, 10)}`;
+const dayNo = (k) => Core.dayNo(k, EPOCH);
+const prevDay = Core.prevDay;
+const md = Core.md;
 const listOf = (mode, date) => (mode === "h" ? G.hardTags(date) : G.dailyTags(date));
 
 // 今日のきほん（震度の要点）を日ごとに1つ。どれも気象庁「震度について」「気象庁震度階級関連解説表」に書いてあること
@@ -695,39 +813,16 @@ const bookOf = (s, m) => (m === "d" ? s.days : m === "h" ? s.hdays : m === "a" ?
 function bank(s, r) { const b = doneOf(r) ? bookOf(s, r.mode) : null; if (!b || b[r.date] || (r.mode === "a" && s.days[r.date])) return false; b[r.date] = recOf(r); return true; }
 // 保存に失敗したあとはメモリと保存の両方を読む。合わせる前に両方を fresh() で補う。数は高いほう、途中経過は同じ回なら進んだほう
 function load() {
-  let a = null, b = null;
-  try { b = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
-  try { a = mem !== null ? JSON.parse(mem) : null; } catch (e) {}
-  if (a && a.v !== 1) a = null; if (b && b.v !== 1) b = null;
-  if (!a || !b) return tidy(Object.assign(fresh(), a || b || {}));
-  a = Object.assign(fresh(), a); b = Object.assign(fresh(), b);
-  const [n, o] = (a.t || 0) >= (b.t || 0) ? [a, b] : [b, a], s = Object.assign(fresh(), n);
-  for (const k in o) {
-    if (k === "runs" || k === "t") continue;
-    const x = o[k], y = n[k];
-    if (x && y && typeof x === "object" && typeof y === "object") { s[k] = Object.assign({}, x, y); for (const q in x) if (typeof x[q] === "number" && typeof y[q] === "number") s[k][q] = Math.max(x[q], y[q]); }
-    else if (typeof x === "number" && typeof y === "number") s[k] = Math.max(x, y);
-    else if (x === true) s[k] = true;
-  }
-  const ra = a.runs || {}, rb = b.runs || {}, prog = (r) => (r.res ? r.res.length : 0) * 1000 + (r.cur ? (r.cur.wrong || []).length * 10 + (r.cur.hints || 0) : 0);
-  s.runs = Object.assign({}, n.runs);
-  // 終えた回（gone）は、保存できなかった側から戻さない（写し元のゲームの PR #1 の CodeRabbit）
-  for (const m of new Set([...Object.keys(ra), ...Object.keys(rb)])) {
-    const x = ra[m], y = rb[m];
-    if (x === undefined || y === undefined) { if (x || y) s.runs[m] = x || y; continue; }
-    if (!x || !y) { const r = x || y; if (!r || (s.gone && s.gone[r.id]) || bank(s, r) || doneOf(r)) { s.runs[m] = null; continue; } const bd = bookOf(s, r.mode); if (!bd || !bd[r.date]) s.runs[m] = r; continue; }
-    if (x.id !== y.id && x.date !== y.date) { const [w, l] = x.date > y.date ? [x, y] : [y, x]; bank(s, l); s.runs[m] = w; }
-    else if (x.id === y.id) {
-      const px = prog(x), py = prog(y), w = px > py ? x : py > px ? y : n.runs[m], o = w === x ? y : x;
-      // 同じ問題の途中なら、まちがい・ヒントは両方を合わせる（保存に失敗した側のまちがいを消さない。CodeRabbit shindo-yomi#1）
-      if (w && o && w.cur && o.cur && typeof w.cur === "object" && typeof o.cur === "object" && w.cur.i === o.cur.i && w.cur.tag === o.cur.tag && w.res.length === o.res.length) {
-        const u = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
-        w.cur = { ...w.cur, wrong: u(w.cur.wrong, o.cur.wrong), w2: u(w.cur.w2, o.cur.w2), hints: Math.max(+w.cur.hints || 0, +o.cur.hints || 0), step: Math.max(w.cur.step === 2 ? 2 : 1, o.cur.step === 2 ? 2 : 1), h2: w.cur.h2 || o.cur.h2 ? 1 : 0, jd: w.cur.jd || o.cur.jd || null };
-      }
-      s.runs[m] = w;
-    }
-  }
-  return tidy(s);
+  return GameStore.load(KEY, mem, {
+    v: 1, fresh, tidy, doneOf, bookOf,
+    bank: (s, r) => !!(s.gone && s.gone[r.id]) || bank(s, r),
+    // 同じ問題の途中なら、まちがい・ヒントは両方を合わせる（保存に失敗した側のまちがいを消さない）
+    join: (w, o) => {
+      if (!(w.cur && o.cur && typeof w.cur === "object" && typeof o.cur === "object" && w.cur.i === o.cur.i && w.cur.tag === o.cur.tag && w.res.length === o.res.length)) return w;
+      const u = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
+      return { ...w, cur: { ...w.cur, wrong: u(w.cur.wrong, o.cur.wrong), w2: u(w.cur.w2, o.cur.w2), hints: Math.max(+w.cur.hints || 0, +o.cur.hints || 0), step: Math.max(w.cur.step === 2 ? 2 : 1, o.cur.step === 2 ? 2 : 1), h2: w.cur.h2 || o.cur.h2 ? 1 : 0, jd: w.cur.jd || o.cur.jd || null } };
+    },
+  });
 }
 // 引き継ぎコードなどから入った値を正しい形に直す（数の所に文字が入っていても画面に出さない）
 const num = Core.num; // 共通部品 game-core（配列・true を数にしない #410）
@@ -754,7 +849,7 @@ function tidy(s) {
 function saveWarn(on) { let b = document.getElementById("savewarn"); if (!on) { if (b) b.remove(); return; } if (b) return; b = document.createElement("div"); b.id = "savewarn"; b.setAttribute("role", "status"); b.textContent = "この端末に記録を保存できませんでした。ページを開き直すと、いまの記録が消えます"; b.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:9999;padding:8px 12px;background:#fff3cd;color:#000;font-size:15px;line-height:1.5;text-align:center;pointer-events:none;border-bottom:2px solid #8a6d00"; (document.body || document.documentElement).appendChild(b); }
 // 保存できないあいだは帯を出したままにし、保存できたら消す（routines/game-dev.md「共通の形」の記録）
 function save(fn) { const s = load(); fn(s); s.t = Math.max(Date.now(), (s.t || 0) + 1); const j = JSON.stringify(s); try { localStorage.setItem(KEY, j); mem = null; saveWarn(false); } catch (e) { mem = j; saveWarn(true); } return s; }
-function streak(days) { let k = todayKey(), n = 0; if (!days[k]) k = prevDay(k); while (days[k]) { n++; k = prevDay(k); } return n; }
+function streak(days) { return Core.streak(days); } // 続けて遊んだ日数（共通部品 game-core。壊れた記録・constructor などの名前を日に数えない）
 const playedDays = (s) => new Set([...Object.keys(s.days), ...Object.keys(s.adays)]).size;
 const solvedAll = (s) => Object.values(s.dex).reduce((a, b) => a + (+b || 0), 0);
 const cleanOf = (r) => r.res.filter((x) => x.m === 0).length;
@@ -799,7 +894,7 @@ const buzz = Core.buzz; // 「動きを減らす」では震わせない
 const esc = Core.esc;
 const toTop = () => window.scrollTo(0, 0);
 const srcHtml = (P) => `<p class="src">出典：${P.src.map(([n, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(n)}</a>`).join("・")}</p>`;
-const footer = () => `<footer><a href="#" id="f-how">遊び方</a><a href="#" id="f-about">このゲームについて</a><a href="#" data-a11y-open>見やすさ</a><a href="#" data-hk>引き継ぎ</a><a href="${FEEDBACK}" target="_blank" rel="noopener" data-feedback="fun">感想を送る</a><a href="https://ko-fi.com/satouaaaaa" target="_blank" rel="noopener">Ko-fi で応援</a></footer>`;
+const footer = () => `<footer><a href="#" id="f-how">遊び方</a><a href="#" id="f-about">このゲームについて</a><a href="#" data-a11y-open>見やすさ</a><a href="#" data-hk>引き継ぎ</a><a href="${FEEDBACK}" data-feedback="fun" target="_blank" rel="noopener" data-feedback="fun">感想を送る</a><a href="https://ko-fi.com/satouaaaaa" target="_blank" rel="noopener">Ko-fi で応援</a></footer>`;
 function bindFooter() { const h = $("f-how"); if (h) h.onclick = (e) => { e.preventDefault(); openHow(); }; const a = $("f-about"); if (a) a.onclick = (e) => { e.preventDefault(); about(); }; }
 function openHow() { $("fb2").href = FEEDBACK; const d = $("howto"); if (d.showModal) d.showModal(); else d.setAttribute("open", ""); }
 $("howto").addEventListener("cancel", () => { if (!load().tut) save((s) => { s.tut = true; }); }); // Esc を押したその場で「見た」を残す（close の知らせは遅れて届き、すぐ読み直すと間に合わない）
@@ -1021,7 +1116,7 @@ function solved() {
     ${cur.jd && cur.jd.sure ? `<p class="sure-res">${cur.jd.ok ? "🎯 自信ありで当てた" : "🎯 自信ありでまちがえた。ここを覚えよう"}</p>` : ""}
     <p class="why" data-a11y-say><b>${esc(P.name)}：</b>${esc(P.why)}</p>
     ${srcHtml(P)}
-    <p class="note"><a href="${FEEDBACK}" target="_blank" rel="noopener" data-feedback="data">この問題のまちがいを知らせる</a></p>
+    <p class="note"><a href="${FEEDBACK}" data-feedback="fun" target="_blank" rel="noopener" data-feedback="data">この問題のまちがいを知らせる</a></p>
     <button class="main ok" id="next">${fin ? "結果を見る" : "次の問題へ"}</button></div>`;
   $("next").onclick = play;
   setTimeout(() => { if ($("next") && cur && cur.done && cur.tag === P.tag) $("next").scrollIntoView({ behavior: A11y && A11y.on("calm") ? "auto" : "smooth", block: "nearest" }); }, 60);
@@ -1058,7 +1153,7 @@ function endFinish(run) {
     ${newAch.length ? `<p class="achnew" id="achnew">${newAch.map((id) => `🏅 実績：${ACH.find((a) => a[0] === id)[1]}`).join("<br>")}</p>` : ""}
     <button class="main" id="go-e">もう一度とことん</button>
     <div class="row"><button class="sub" id="go-p">練習する</button><button class="sub" id="go-dex">ようす帳を見る</button></div>
-    <p class="note"><a href="${FEEDBACK}" target="_blank" rel="noopener" data-feedback="fun">感想を送る</a></p>`;
+    <p class="note"><a href="${FEEDBACK}" data-feedback="fun" target="_blank" rel="noopener" data-feedback="fun">感想を送る</a></p>`;
   $("back").onclick = home; $("go-e").onclick = () => startRun("e"); $("go-p").onclick = practiceMenu; $("go-dex").onclick = book;
   toTop();
 }
@@ -1090,7 +1185,7 @@ function result(mode, k, first, prec, newAch = []) {
     ${mode === "d" && k === todayKey() && !s.hdays[k] ? `<button class="main alt" id="go-h">上級：むずかしい3問に挑む</button>` : ""}
     <div class="row"><button class="sub" id="go-p">練習する</button><button class="sub" id="go-dex">ようす帳を見る</button></div>
     ${showKofi ? `<p class="note kofi">役に立ったら、<a href="https://ko-fi.com/satouaaaaa" target="_blank" rel="noopener">Ko-fi でコーヒー1杯の応援</a>をもらえると、新しいゲームづくりの励みになります（任意・遊ぶのはずっと無料）。</p>` : ""}
-    <p class="note"><a href="${FEEDBACK}" target="_blank" rel="noopener" data-feedback="fun">感想を送る</a></p>`;
+    <p class="note"><a href="${FEEDBACK}" data-feedback="fun" target="_blank" rel="noopener" data-feedback="fun">感想を送る</a></p>`;
   $("back").onclick = home; $("go-p").onclick = practiceMenu; $("go-dex").onclick = book;
   if ($("go-e")) $("go-e").onclick = () => startRun("e");
   if ($("go-h")) $("go-h").onclick = () => (k === todayKey() ? startRun("h") : home());
@@ -1127,8 +1222,8 @@ function achView() {
   $("back").onclick = home; bindFooter(); toTop();
 }
 // 遊んだ日のカレンダー：今日の5問の日は★（まちがいの少なさ）、あとから遊んだ日は ↺、取りこぼした過去7日は押すとあとから遊べる
-const ymOf = (k) => k.slice(0, 7);
-const ymAdd = (ym, n) => { const d = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+const ymOf = Core.ymOf;
+const ymAdd = Core.ymAdd;
 const lvOf = (rec) => { const t = rec && Array.isArray(rec.m) ? rec.m.reduce((a, b) => a + b, 0) : 9; return t === 0 ? 3 : t <= 2 ? 2 : 1; };
 function cal(ym) {
   const s = load(), k = todayKey(), late = lateDays(s, k), st = streak(s.days);
