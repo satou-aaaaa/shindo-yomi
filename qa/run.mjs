@@ -539,7 +539,7 @@ try {
 // game-core（shared-workflows template/qa/core-check.mjs）：はじめての練習1問と吹き出し・感想のリンク
 try {
   await checkCore({ browser, url, check, solve: async (pg) => { await pg.click(`.ch[data-j="${await ansIdx(pg)}"]`); await why(pg); await pg.waitForSelector(".verdict"); } });
-} catch (e) { check("game-core の検査が最後まで動く", false, e.message.split("\n")[0]); }
+} catch (e) { console.log("DBGERR", e.message.replace(/\n/g, " | ").slice(0, 1500)); check("game-core の検査が最後まで動く", false, e.message.split("\n")[0]); }
 // 引き継ぎコード（shared-workflows template/qa/transfer-check.mjs）
 try {
   const sample = { "shd-v1": JSON.stringify({ v: 1, tut: true, days: { "2026-11-13": { m: [0, 1, 0, 0, 2], k: ["t4", "t1", "t3", "i3", "o5s"] } }, hdays: {}, adays: {}, dex: { t4: 1, t0: 1, t6s: 1, t3: 1, o4: 1 }, runs: {}, kofi: {}, ach: {}, ebest: 7, t: 1 }), "shd-fs": "3", "shd-depth": JSON.stringify({ v: 1, rv: { "t4|x1": { s: 1, due: "2026-11-20", t: 5 } } }) }; // 復習の記録も引き継ぐかを見る（CodeRabbit shindo-yomi#1）
