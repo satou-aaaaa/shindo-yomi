@@ -9,7 +9,7 @@
 //   - 「感想を送る」（a[data-feedback]）が共通の Googleフォームの事前入力リンクになる
 //   - はじめて開くと「遊び方」の窓（dialog）でなく、練習の1問と吹き出しが出る。押す所を隠さない（スマホ幅とパソコン幅）
 //   - 吹き出しのボタンは 44px 以上・名前がある・読み上げにも届く
-//   - 「案内をとじる」でも Esc でも消え、読み直しても二度と出ない（「見た」はその場で残る）
+//   - 「案内を閉じる」でも Esc でも消え、読み直しても二度と出ない（「見た」はその場で残る）
 //   - solve で最後まで進めると吹き出しが消える
 export async function checkCore({ browser, url, check, solve, first = true, widths = [360, 1280] }) {
   const open = async (w) => {
@@ -49,7 +49,7 @@ export async function checkCore({ browser, url, check, solve, first = true, widt
     }
     check("吹き出しが、押す所・読む所（印を付けた所）に重ならない", bad.length === 0, bad.join("・"));
     await p.click("#core-coach .core-coach-skip"); await p.waitForTimeout(100);
-    check("「案内をとじる」で消え、印も残らない", await p.locator("#core-coach").count() === 0 && await p.locator(".core-coach-on").count() === 0);
+    check("「案内を閉じる」で消え、印も残らない", await p.locator("#core-coach").count() === 0 && await p.locator(".core-coach-on").count() === 0);
     await p.reload(); await p.waitForTimeout(300);
     check("とじたあと読み直しても、吹き出しも遊び方の窓も出ない", await p.locator("#core-coach").count() === 0 && await p.locator("dialog[open]").count() === 0);
     check("はじめての案内でエラーが出ない", errs.length === 0, errs.join(" / "));
@@ -82,11 +82,16 @@ export async function checkCore({ browser, url, check, solve, first = true, widt
     const go = p.locator("#core-coach .core-coach-go:not([hidden])");
     for (let n = 0; n < 3 && await go.count(); n++) { await go.click(); await p.waitForTimeout(100); }
     await solve(p);
+    const covered = [];
     for (let n = 0; n < 20 && await p.locator("#core-coach").count(); n++) {
+      // 吹き出しが押す所を隠したままにならない（ページが動いたあと、古い場所に残っていた。2026-11-22）
+      const clear = await p.waitForFunction(() => { const c = document.getElementById("core-coach"), t = document.querySelector(".core-coach-on"); if (!c || !t || c.hidden) return true; const a = c.getBoundingClientRect(), r = t.getBoundingClientRect(); return !(Math.min(a.bottom, r.bottom) - Math.max(a.top, r.top) > 1 && !(a.right <= r.left || a.left >= r.right)); }, null, { timeout: 2000 }).then(() => true, () => false);
+      if (!clear) covered.push(n + 1);
       const g = p.locator("#core-coach .core-coach-go:not([hidden])");
       if (await g.count()) { await g.click(); } else { const t = p.locator(".core-coach-on").first(); if (!await t.count()) break; await t.click(); }
       await p.waitForTimeout(250);
     }
+    check("練習の1問を進めるあいだ、吹き出しが押す所を2秒より長く隠さない", covered.length === 0, covered.join(","));
     check("練習の1問を最後まで進めると、吹き出しが消える", await p.locator("#core-coach").count() === 0 && await p.locator(".core-coach-on").count() === 0);
     check("練習の1問を最後まで進めてもエラーが出ない", errs.length === 0, errs.join(" / "));
     await ctx.close();
