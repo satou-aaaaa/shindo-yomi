@@ -11,6 +11,8 @@
 //   - 吹き出しのボタンは 44px 以上・名前がある・読み上げにも届く
 //   - 「案内を閉じる」でも Esc でも消え、読み直しても二度と出ない（「見た」はその場で残る）
 //   - solve で最後まで進めると吹き出しが消える
+//   - （版5から）ページの上の右に「？ 遊び方」があり、押すと遊び方が開く・押す所を隠さない・44px 以上
+//   - （版5から）このページの script のエラーで不具合の帯が出て、「不具合を知らせる」は押したときだけ開く感想フォームのリンク。自動では何も送らない
 // 止まったときに、どの段で何を待っていたかが1行目に出るようにする（ゲームの QA は1行目だけを残す。2026-11-22）
 export async function checkCore(o) {
   const st = { at: "はじめ" };
@@ -37,7 +39,9 @@ async function coreSteps({ browser, url, check, solve, first = true, widths = [3
     mark("はじめての案内");
     const { ctx, p, errs } = await open(widths[0]);
     check("game-core：window.Core があり版がある", await p.evaluate(() => !!(window.Core && window.Core.v >= 1)));
-    if (!first) { await ctx.close(); return; }
+    // はじめての案内を入れていないゲーム（first: false）は、ここからの吹き出しの検査だけを飛ばす（下の「？ 遊び方」・不具合の帯は見る）
+    if (!first) await ctx.close();
+    else {
     check("はじめて開くと、遊び方の窓でなく練習の1問と吹き出しが出る", await p.locator("dialog[open]").count() === 0 && await p.locator("#core-coach:not([hidden])").count() === 1 && (await p.textContent("#core-coach-t")).length > 5);
     check("吹き出しに名前（aria-label）がある・ボタンは 44px 以上", await p.evaluate(() => { const c = document.getElementById("core-coach"); return !!c.getAttribute("aria-label") && [...c.querySelectorAll("button:not([hidden])")].every((b) => { const r = b.getBoundingClientRect(); return Math.round(r.height) >= 44 && Math.round(r.width) >= 44; }); }));
     await p.waitForTimeout(100);
@@ -61,15 +65,16 @@ async function coreSteps({ browser, url, check, solve, first = true, widths = [3
     check("とじたあと読み直しても、吹き出しも遊び方の窓も出ない", await p.locator("#core-coach").count() === 0 && await p.locator("dialog[open]").count() === 0);
     check("はじめての案内でエラーが出ない", errs.length === 0, errs.join(" / "));
     await ctx.close();
+    }
   }
-  {
+  if (first) {
     mark("Esc");
     const { ctx, p } = await open(widths[0]);
     await p.keyboard.press("Escape"); await p.waitForTimeout(100);
     check("Esc でも吹き出しが消える", await p.locator("#core-coach").count() === 0);
     await ctx.close();
   }
-  {
+  if (first) {
     mark("感想のリンク");
     const { ctx, p } = await open(widths[0]);
       // 「感想を送る」（data-feedback）は、押したその時に全ゲーム共通の Googleフォームの事前入力リンクになる（GitHub のアカウントが無くても送れる）
@@ -84,6 +89,45 @@ async function coreSteps({ browser, url, check, solve, first = true, widths = [3
         return { href: a.href, target: a.target };
       });
       check("「感想を送る」が全ゲーム共通の Googleフォーム（ゲーム名と付属情報を事前入力）を新しいタブで開く", !!fb && /^https:\/\/docs\.google\.com\/forms\/d\/e\/[\w-]+\/viewform\?usp=pp_url&/.test(fb.href) && /entry\.443796210=[^&]+/.test(fb.href) && /entry\.1094269478=/.test(fb.href) && fb.target === "_blank", fb ? fb.href.slice(0, 120) : "data-feedback のリンクが無い");
+    await ctx.close();
+  }
+  if (await (async () => { const { ctx, p } = await open(widths[0]); const v = await p.evaluate(() => (window.Core && Core.v) || 0); await ctx.close(); return v >= 5; })()) {
+    mark("？遊び方");
+    for (const w of widths) {
+      const { ctx, p, errs } = await open(w);
+      await p.evaluate(() => { if (window.Core && Core.coach && Core.coach.active()) Core.coach.leave(); });
+      await p.waitForTimeout(200);
+      const r = await p.evaluate(() => {
+        const b = document.getElementById("core-help");
+        if (!b) return null;
+        const a = b.getBoundingClientRect();
+        // 「？」の下に、ほかの押せる所が重なっていない（ページの上に場所を空けて置く。routines/ui-rules.md U1）
+        const under = [...document.querySelectorAll("a[href],button,input,select,textarea,summary,[role=button],[tabindex]")].filter((e) => e !== b && !b.contains(e) && e.getClientRects().length && !e.closest("dialog:not([open]),[hidden]")).filter((e) => { const x = e.getBoundingClientRect(); return x.width > 0 && !(x.right <= a.left || x.left >= a.right || x.bottom <= a.top || x.top >= a.bottom); }).map((e) => (e.id ? "#" + e.id : e.tagName.toLowerCase()) + "「" + (e.getAttribute("aria-label") || e.textContent || "").trim().slice(0, 12) + "」");
+        return { w: a.width, h: a.height, right: innerWidth - a.right, top: a.top + scrollY, label: b.getAttribute("aria-label"), under };
+      });
+      check(`「？ 遊び方」がページの上の右にある・名前がある・44px 以上（${w}px）`, !!r && r.w >= 44 && r.h >= 44 && r.right <= 40 && r.top <= 12 && !!r.label, JSON.stringify(r));
+      check(`「？ 遊び方」がほかの押せる所に重ならない（${w}px）`, !!r && r.under.length === 0, r ? r.under.join("・") : "");
+      if (r && r.w > 0) {
+        await p.click("#core-help"); await p.waitForTimeout(250);
+        check(`「？ 遊び方」を押すと遊び方が開く（${w}px）`, await p.locator("dialog[open]").count() >= 1);
+      }
+      check(`「？ 遊び方」でエラーが出ない（${w}px）`, errs.length === 0, errs.join(" / "));
+      await ctx.close();
+    }
+    mark("不具合の帯");
+    const { ctx, p } = await open(widths[0]);
+    const sent = [];
+    p.on("request", (q) => { if (!q.url().startsWith("file:") && !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(q.url()) && !/fonts\.(googleapis|gstatic)\.com/.test(q.url())) sent.push(q.url().slice(0, 60)); });
+    await p.evaluate(() => { if (window.Core && Core.coach && Core.coach.active()) Core.coach.leave(); });
+    check("エラーが無いあいだは不具合の帯を出さない", await p.locator("#core-err").count() === 0);
+    await p.evaluate(() => setTimeout(() => { throw new Error("core-check のわざと"); }, 0));
+    await p.waitForTimeout(300);
+    const bar = await p.evaluate(() => { const d = document.getElementById("core-err"); if (!d) return null; const a = d.querySelector("a[data-feedback]"); return { role: d.getAttribute("role"), href: a ? a.href : "", btn: [...d.querySelectorAll("a,button")].every((b) => { const x = b.getBoundingClientRect(); return Math.round(x.height) >= 44 && Math.round(x.width) >= 44; }) }; });
+    check("このページのエラーで不具合の帯が出る（role=alert・ボタンは 44px 以上）", !!bar && bar.role === "alert" && bar.btn, JSON.stringify(bar));
+    check("「不具合を知らせる」は感想フォーム（不具合・最後のエラー入り）のリンク", !!bar && /^https:\/\/docs\.google\.com\/forms\//.test(bar.href) && [...new URL(bar.href).searchParams.values()].join("\n").includes("core-check のわざと"), bar ? bar.href.slice(0, 80) : "");
+    check("不具合の帯を出しても、外へは何も送らない（押した人だけがフォームを開く）", sent.length === 0, sent.join(" / "));
+    if (bar && await p.locator("#core-err button").isVisible()) { await p.click("#core-err button"); await p.waitForTimeout(100); }
+    check("「閉じる」で不具合の帯が消える", !!bar && await p.locator("#core-err").count() === 0);
     await ctx.close();
   }
   if (solve) {
